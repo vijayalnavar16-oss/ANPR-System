@@ -1,0 +1,34 @@
+[project]
+name = "anpr-system"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "streamlit==1.65.0",
+    "opencv-python==5.0.0.93; sys_platform == 'win32'",
+    "opencv-python-headless==5.0.0.93; sys_platform != 'win32'",
+    "torch==2.14.1+cpu",
+    "torchvision==0.29.1+cpu",
+    "ultralytics==8.4.175",
+    "easyocr==1.7.2",
+    "numpy==2.4.4",
+    "pillow==12.3.0",
+    "flask>=3.0.0,<4.0.0",
+    "gunicorn>=22.0.0,<24.0.0; sys_platform != 'win32'",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
+exclude-dependencies = [
+    { package = { name = "ultralytics", version = "8.4.175" }, dependencies = ["opencv-python"] },
+    { package = { name = "easyocr", version = "1.7.2" }, dependencies = ["opencv-python-headless"] },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }

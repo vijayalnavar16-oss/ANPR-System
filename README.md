@@ -170,9 +170,9 @@ python -m venv venv
 # On Linux/macOS:
 source venv/bin/activate
 
-# Install uv and dependencies (uv applies the OpenCV dependency exclusions in uv.toml)
+# Install uv and the locked project dependencies
 python -m pip install uv
-uv pip install -r requirements.txt
+uv sync
 ```
 
 ### 3. Run the Streamlit application
@@ -208,17 +208,18 @@ path; it refuses to use the original `database/anpr.db` as its write target.
 3. Choose **Create app** → **Yup, I have an app**.
 4. Select repository `vijayalnavar16-oss/ANPR-System`, branch
    `streamlit-deployment`, and main file `streamlit_app.py`.
-5. In **Advanced settings**, choose Python 3.12, then deploy. The repository
-   dependencies are validated for Python 3.12; changing this file does not
-   change the Python version selected by an existing Cloud app.
+5. In **Advanced settings**, choose Python 3.12, then deploy. Streamlit
+   Community Cloud selects `uv.lock` ahead of `requirements.txt`; the lock is
+   generated from `pyproject.toml` for Python 3.12. Changing the repository
+   does not change the Python version selected by an existing Cloud app.
 6. Wait for the package build to finish. On the first **Run plate recognition**,
    the app loads the YOLO models and EasyOCR automatically downloads its CRAFT
    detector and English recognition weights. This first analysis can take a few
    minutes; the cached models are reused for later analyses in the same app
    process.
-7. `packages.txt` installs Debian's `libgl1`, which provides `libGL.so.1` for
-   the OpenCV runtime in the current Cloud environment. Linux Python dependency
-   resolution still selects only the headless OpenCV wheel.
+7. Community Cloud uses `uv.lock` for the Streamlit app. It installs only the
+   headless OpenCV wheel on Linux, so no OpenGL/GLib apt packages are required.
+   `requirements.txt` remains for the existing Flask Render service.
 
 The custom YOLOv8 weights (24.5 MB) and fallback weights (6.2 MB) are already
 stored in the repository; each file is below GitHub's 100 MB file limit.

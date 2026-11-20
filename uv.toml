@@ -1,5 +1,0 @@
-# Use the platform-specific OpenCV wheel declared in requirements.txt.
-exclude-dependencies = [
-    { package = { name = "ultralytics", version = "8.4.175" }, dependencies = ["opencv-python"] },
-    { package = { name = "easyocr", version = "1.7.2" }, dependencies = ["opencv-python-headless"] },
-]
