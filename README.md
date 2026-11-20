@@ -189,6 +189,12 @@ To access from other devices on your local Wi-Fi network (e.g. smartphone or tab
 http://<YOUR_LOCAL_IP>:5000
 ```
 
+### 4. Deploy a Public Demo
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vijayalnavar16-oss/ANPR-System)
+
+The Render Blueprint runs the dashboard in read-only demo mode. Cloud hosting cannot access your computer's webcam or iVCam, and camera controls and record verification are disabled. Render assigns a public URL after you sign in and complete deployment; its free service may sleep when idle.
+
 ---
 
 ## 📱 Using iVCam as External Camera

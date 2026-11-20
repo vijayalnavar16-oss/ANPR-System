@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: anpr-system-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 4 --bind 0.0.0.0:$PORT --timeout 120 app:app
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: PUBLIC_DEMO_MODE
+        value: "true"

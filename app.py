@@ -6,12 +6,12 @@ from flask import Flask, render_template, Response, request, jsonify, send_from_
 
 from config import (
     BASE_DIR,
-    STATIC_DIR,
     FLASK_HOST,
     FLASK_PORT,
     FLASK_DEBUG,
     CAMERA_SOURCE,
-    CAPTURES_DIR
+    CAPTURES_DIR,
+    PUBLIC_DEMO_MODE
 )
 from database.db_handler import (
     init_db,
@@ -32,6 +32,13 @@ init_db()
 # 2. Initialize Camera & ANPR Engine
 camera = VideoCamera(source=CAMERA_SOURCE)
 anpr_engine = ANPREngine()
+
+
+def demo_mode_error():
+    return jsonify({
+        "success": False,
+        "error": "This action is disabled in public demo mode."
+    }), 403
 
 
 def generate_video_stream():
@@ -80,6 +87,8 @@ def video_feed():
 @app.route('/api/camera/start', methods=['POST'])
 def start_camera():
     """Start or resume camera capture."""
+    if PUBLIC_DEMO_MODE:
+        return demo_mode_error()
     success = camera.start()
     return jsonify({
         "success": success,
@@ -92,6 +101,8 @@ def start_camera():
 @app.route('/api/camera/stop', methods=['POST'])
 def stop_camera():
     """Stop camera capture and release resources."""
+    if PUBLIC_DEMO_MODE:
+        return demo_mode_error()
     camera.stop()
     return jsonify({
         "success": True,
@@ -102,6 +113,8 @@ def stop_camera():
 @app.route('/api/camera/list', methods=['GET'])
 def get_available_cameras():
     """List all detected cameras (Laptop Webcam, Iriun Webcam, etc.)."""
+    if PUBLIC_DEMO_MODE:
+        return jsonify({"cameras": []})
     cams = list_available_cameras()
     return jsonify({"cameras": cams})
 
@@ -109,6 +122,8 @@ def get_available_cameras():
 @app.route('/api/camera/config', methods=['POST'])
 def configure_camera():
     """Update camera source (integer index or IP camera stream URL)."""
+    if PUBLIC_DEMO_MODE:
+        return demo_mode_error()
     data = request.get_json() or {}
     new_source = data.get("source", 0)
     camera.set_source(new_source)
@@ -123,6 +138,8 @@ def configure_camera():
 @app.route('/api/camera/rotation', methods=['POST'])
 def set_camera_rotation():
     """Update camera frame rotation (0, 90, 180, 270 degrees)."""
+    if PUBLIC_DEMO_MODE:
+        return demo_mode_error()
     data = request.get_json() or {}
     angle = int(data.get("rotation", 0))
     success = camera.set_rotation(angle)
@@ -168,6 +185,8 @@ def verify_record(record_id):
     Allows user to edit incorrectly recognized plate, confirm, or reject a record.
     Preserves original OCR output and audits changes.
     """
+    if PUBLIC_DEMO_MODE:
+        return demo_mode_error()
     data = request.get_json() or {}
     corrected_plate = data.get('plate_number', '').strip().upper()
     action = data.get('action', 'CONFIRM').upper()  # 'CONFIRM' or 'REJECT'
@@ -197,26 +216,40 @@ def verify_record(record_id):
 
 @app.route('/image_view')
 def image_view():
-    """Universal safe image server for captures, test plates, and absolute paths."""
+    """Serve images only from the app's capture and test-image directories."""
     raw_path = request.args.get('path', '').strip()
     if not raw_path:
         return '', 404
-    
-    p = Path(raw_path)
-    if not p.is_absolute():
-        if (BASE_DIR / raw_path).exists():
-            p = BASE_DIR / raw_path
-        elif (CAPTURES_DIR / p.name).exists():
-            p = CAPTURES_DIR / p.name
-        elif (STATIC_DIR / "captures" / p.name).exists():
-            p = STATIC_DIR / "captures" / p.name
-        elif (BASE_DIR / "test_plates" / p.name).exists():
-            p = BASE_DIR / "test_plates" / p.name
-        elif (BASE_DIR / "test_output" / "crops" / p.name).exists():
-            p = BASE_DIR / "test_output" / "crops" / p.name
-    
-    if p.exists() and p.is_file():
-        return send_from_directory(str(p.parent), p.name)
+
+    requested_path = Path(raw_path)
+    roots = (
+        CAPTURES_DIR.resolve(),
+        (BASE_DIR / "test_plates").resolve(),
+        (BASE_DIR / "test_output" / "crops").resolve()
+    )
+    if requested_path.is_absolute():
+        candidates = [requested_path]
+    else:
+        candidates = [
+            BASE_DIR / requested_path,
+            CAPTURES_DIR / requested_path.name,
+            BASE_DIR / "test_plates" / requested_path.name,
+            BASE_DIR / "test_output" / "crops" / requested_path.name
+        ]
+
+    for candidate in candidates:
+        try:
+            resolved_path = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if not resolved_path.is_file():
+            continue
+        for root in roots:
+            try:
+                resolved_path.relative_to(root)
+            except ValueError:
+                continue
+            return send_from_directory(str(resolved_path.parent), resolved_path.name)
     return '', 404
 
 
