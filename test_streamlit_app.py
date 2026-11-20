@@ -1,7 +1,9 @@
 import csv
 import os
 import sqlite3
+import threading
 import tempfile
+import time
 import unittest
 from contextlib import nullcontext
 from io import BytesIO
@@ -9,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import av
 import cv2
 import numpy as np
 
@@ -33,7 +36,7 @@ class FakeDetector:
         self.model_path = Path(model_path)
         self.conf_threshold = 0.35
 
-    def detect_plates(self, image, save_crops, device):
+    def detect_plates(self, image, save_crops, device=None):
         self.device = device
         detections = []
         if self.with_plate:
@@ -293,6 +296,275 @@ class SingleImagePipelineTests(unittest.TestCase):
         self.assertEqual(result["plate_count"], 0)
         self.assertEqual(self.reader.calls, 0)
         insert.assert_not_called()
+
+
+class LiveCameraTests(unittest.TestCase):
+    def test_webrtc_streamer_requests_mobile_rear_camera_and_shared_models(self):
+        shared_engine = ANPREngine(
+            detector=FakeDetector(),
+            ocr_reader=FakeOCRReader()
+        )
+        context = SimpleNamespace(
+            state=SimpleNamespace(playing=False, signalling=False),
+            video_processor=None
+        )
+
+        with (
+            mock.patch.object(streamlit_app.st, "subheader"),
+            mock.patch.object(streamlit_app.st, "write"),
+            mock.patch.object(streamlit_app.st, "caption"),
+            mock.patch.object(streamlit_app.st, "slider", return_value=1.0),
+            mock.patch.object(streamlit_app.st, "info"),
+            mock.patch.object(streamlit_app.st, "error"),
+            mock.patch.object(
+                streamlit_app, "get_anpr_engine", return_value=shared_engine
+            ),
+            mock.patch.object(
+                streamlit_app, "webrtc_streamer", return_value=context
+            ) as webrtc,
+            mock.patch.object(streamlit_app, "_render_live_camera_status_fragment"),
+        ):
+            streamlit_app._render_live_camera()
+
+        options = webrtc.call_args.kwargs
+        self.assertEqual(options["mode"], streamlit_app.WebRtcMode.SENDRECV)
+        self.assertEqual(
+            options["media_stream_constraints"]["video"]["facingMode"],
+            {"ideal": "environment"}
+        )
+        self.assertEqual(
+            options["rtc_configuration"]["iceServers"][0]["urls"],
+            ["stun:stun.l.google.com:19302"]
+        )
+        self.assertTrue(options["async_processing"])
+
+        processor = options["video_processor_factory"]()
+        self.assertIs(processor.engine.detector, shared_engine.detector)
+        self.assertIs(processor.engine.ocr_reader, shared_engine.ocr_reader)
+        self.assertIs(
+            processor.engine.image_inference_lock,
+            shared_engine.image_inference_lock
+        )
+        self.assertIs(processor.engine.lock, shared_engine.lock)
+        self.assertIs(
+            processor.engine.recent_detections,
+            shared_engine.recent_detections
+        )
+        processor.on_ended()
+
+    def test_frame_callback_uses_worker_interval_and_stop_closes_processor(self):
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+        frame = av.VideoFrame.from_ndarray(image, format="bgr24")
+        inference_started = threading.Event()
+        release_inference = threading.Event()
+        callback_finished = threading.Event()
+        output_frames = []
+        engine = mock.Mock()
+        engine.cached_annotations = []
+
+        def delayed_inference(frame_image, log_to_db=True):
+            inference_started.set()
+            release_inference.wait(timeout=2)
+            return frame_image, []
+
+        engine.process_frame.side_effect = delayed_inference
+        processor = streamlit_app.LiveANPRVideoProcessor(
+            engine,
+            threading.Lock(),
+            frame_interval_seconds=1.0
+        )
+
+        def run_callback():
+            output_frames.append(processor.recv(frame))
+            callback_finished.set()
+
+        callback_thread = threading.Thread(target=run_callback)
+        callback_thread.start()
+        try:
+            self.assertTrue(inference_started.wait(timeout=1))
+            self.assertTrue(callback_finished.wait(timeout=1))
+            processor.recv(frame)
+            self.assertEqual(engine.process_frame.call_count, 1)
+            self.assertEqual(
+                output_frames[0].to_ndarray(format="bgr24").shape,
+                image.shape
+            )
+        finally:
+            release_inference.set()
+            callback_thread.join(timeout=2)
+            deadline = time.monotonic() + 1
+            while processor.get_snapshot()["processing"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            processor.on_ended()
+
+        processor.recv(frame)
+        self.assertEqual(engine.process_frame.call_count, 1)
+
+    def test_live_status_explains_start_and_camera_permission(self):
+        context = SimpleNamespace(
+            state=SimpleNamespace(playing=False, signalling=False),
+            video_processor=None
+        )
+        with mock.patch.object(streamlit_app.st, "info") as info:
+            streamlit_app._render_live_camera_status(context)
+
+        self.assertIn("camera permission", info.call_args.args[0].lower())
+        self.assertIn("webrtc", info.call_args.args[0].lower())
+
+    def test_stop_waits_for_inflight_inference_to_finish(self):
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+        frame = av.VideoFrame.from_ndarray(image, format="bgr24")
+        inference_started = threading.Event()
+        release_inference = threading.Event()
+        stop_finished = threading.Event()
+        engine = mock.Mock()
+        engine.cached_annotations = []
+
+        def delayed_inference(frame_image, log_to_db=True):
+            inference_started.set()
+            release_inference.wait(timeout=2)
+            return frame_image, []
+
+        engine.process_frame.side_effect = delayed_inference
+        processor = streamlit_app.LiveANPRVideoProcessor(
+            engine,
+            threading.Lock(),
+            frame_interval_seconds=0.5
+        )
+        processor.recv(frame)
+        self.assertTrue(inference_started.wait(timeout=1))
+        stop_thread = threading.Thread(
+            target=lambda: (processor.on_ended(), stop_finished.set())
+        )
+        stop_thread.start()
+        try:
+            self.assertFalse(stop_finished.wait(timeout=0.05))
+        finally:
+            release_inference.set()
+            stop_thread.join(timeout=2)
+
+        self.assertTrue(stop_finished.is_set())
+        processor.recv(frame)
+        self.assertEqual(engine.process_frame.call_count, 1)
+
+    def test_inference_failure_is_reported_and_stops_future_processing(self):
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+        frame = av.VideoFrame.from_ndarray(image, format="bgr24")
+        inference_failed = threading.Event()
+        engine = mock.Mock()
+        engine.cached_annotations = []
+
+        def fail_inference(frame_image, log_to_db=True):
+            inference_failed.set()
+            raise RuntimeError("model inference failed")
+
+        engine.process_frame.side_effect = fail_inference
+        processor = streamlit_app.LiveANPRVideoProcessor(
+            engine,
+            threading.Lock(),
+            frame_interval_seconds=0.5
+        )
+        try:
+            processor.recv(frame)
+            self.assertTrue(inference_failed.wait(timeout=1))
+            deadline = time.monotonic() + 1
+            while processor.get_snapshot()["processing"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+            context = SimpleNamespace(
+                state=SimpleNamespace(playing=True, signalling=False),
+                video_processor=processor
+            )
+            with mock.patch.object(streamlit_app.st, "error") as error:
+                streamlit_app._render_live_camera_status(context)
+
+            self.assertIn("model inference failed", error.call_args.args[0])
+            processor.recv(frame)
+            self.assertEqual(engine.process_frame.call_count, 1)
+        finally:
+            processor.on_ended()
+
+    def test_process_frame_suppresses_repeated_plate_records(self):
+        engine = ANPREngine(
+            detector=FakeDetector(),
+            ocr_reader=FakeOCRReader()
+        )
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                mock.patch("modules.anpr_engine.CAPTURES_DIR", Path(temp_dir)),
+                mock.patch(
+                    "modules.anpr_engine.insert_record", return_value=1
+                ) as insert,
+                mock.patch(
+                    "modules.anpr_engine.time.time",
+                    side_effect=[100.0, 100.5]
+                )
+            ):
+                first_frame = engine.process_frame(image.copy(), log_to_db=True)
+                second_frame = engine.process_frame(image.copy(), log_to_db=True)
+
+        self.assertEqual(insert.call_count, 1)
+        self.assertTrue(first_frame[1][0]["logged"])
+        self.assertFalse(second_frame[1][0]["logged"])
+
+    def test_duplicate_suppression_is_shared_between_live_streams(self):
+        shared_engine = ANPREngine(
+            detector=FakeDetector(),
+            ocr_reader=FakeOCRReader()
+        )
+        first_stream = streamlit_app._create_live_video_processor(
+            shared_engine, 1.0
+        )
+        second_stream = streamlit_app._create_live_video_processor(
+            shared_engine, 1.0
+        )
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with (
+                    mock.patch(
+                        "modules.anpr_engine.CAPTURES_DIR", Path(temp_dir)
+                    ),
+                    mock.patch(
+                        "modules.anpr_engine.insert_record", return_value=1
+                    ) as insert,
+                    mock.patch(
+                        "modules.anpr_engine.time.time",
+                        side_effect=[100.0, 100.5]
+                    )
+                ):
+                    first_frame = first_stream.engine.process_frame(
+                        image.copy(), log_to_db=True
+                    )
+                    second_frame = second_stream.engine.process_frame(
+                        image.copy(), log_to_db=True
+                    )
+        finally:
+            first_stream.on_ended()
+            second_stream.on_ended()
+
+        self.assertEqual(insert.call_count, 1)
+        self.assertTrue(first_frame[1][0]["logged"])
+        self.assertFalse(second_frame[1][0]["logged"])
+
+    def test_cctv_input_remains_separate_from_browser_live_camera(self):
+        with (
+            mock.patch.object(streamlit_app.st, "title"),
+            mock.patch.object(
+                streamlit_app.st, "radio", return_value="CCTV/IP Camera"
+            ) as input_selector,
+            mock.patch.object(
+                streamlit_app, "_render_cctv_ip_camera_info"
+            ) as render_cctv,
+        ):
+            streamlit_app._render_image_recognition()
+
+        self.assertIn("LIVE CAMERA", input_selector.call_args.args[1])
+        self.assertIn("CCTV/IP Camera", input_selector.call_args.args[1])
+        render_cctv.assert_called_once_with()
 
 
 class DetectorFallbackTests(unittest.TestCase):

@@ -3,18 +3,29 @@
 import csv
 import hashlib
 import io
+import logging
 import os
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from typing import Any
 
+import av
 import cv2
 import numpy as np
 import streamlit as st
+from streamlit_webrtc import VideoProcessorBase, WebRtcMode, webrtc_streamer
 
 APP_DIR = Path(__file__).resolve().parent
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
+LOGGER = logging.getLogger(__name__)
+WEBRTC_RTC_CONFIGURATION = {
+    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+}
 
 
 def _configure_streamlit_database() -> Path:
@@ -75,6 +86,240 @@ def get_anpr_engine() -> ANPREngine:
     engine.detector.load_model()
     engine.ocr_reader.initialize_reader()
     return engine
+
+
+class LiveANPRVideoProcessor(VideoProcessorBase):
+    """Keep WebRTC frame callbacks fast while a worker runs interval-based ANPR."""
+
+    def __init__(
+        self,
+        engine: ANPREngine,
+        inference_lock: Any,
+        frame_interval_seconds: float
+    ) -> None:
+        self.engine = engine
+        self._inference_lock = inference_lock
+        self._state_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="anpr-live"
+        )
+        self._frame_interval_seconds = frame_interval_seconds
+        self._last_submitted_at: float | None = None
+        self._processing = False
+        self._closed = False
+        self._annotations: list[dict] = []
+        self._detections: list[dict] = []
+        self._error: str | None = None
+        self._message = "Waiting for camera frames."
+
+    def set_frame_interval(self, seconds: float) -> None:
+        if not 0.5 <= seconds <= 2.0:
+            raise ValueError("Frame interval must be between 0.5 and 2.0 seconds.")
+        with self._state_lock:
+            self._frame_interval_seconds = seconds
+
+    def get_snapshot(self) -> dict[str, Any]:
+        with self._state_lock:
+            return {
+                "detections": [dict(item) for item in self._detections],
+                "error": self._error,
+                "message": self._message,
+                "processing": self._processing
+            }
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        image = frame.to_ndarray(format="bgr24")
+        current_time = time.monotonic()
+        with self._state_lock:
+            interval_elapsed = (
+                self._last_submitted_at is None
+                or current_time - self._last_submitted_at
+                >= self._frame_interval_seconds
+            )
+            if (
+                not self._closed
+                and self._error is None
+                and not self._processing
+                and interval_elapsed
+            ):
+                self._processing = True
+                self._last_submitted_at = current_time
+                try:
+                    self._executor.submit(self._process_frame, image.copy())
+                except RuntimeError as exc:
+                    self._processing = False
+                    self._error = f"{type(exc).__name__}: {exc}"
+
+            annotations = [dict(item) for item in self._annotations]
+
+        output = image.copy()
+        for annotation in annotations:
+            self.engine._draw_box(output, annotation)
+        return av.VideoFrame.from_ndarray(output, format="bgr24")
+
+    def _process_frame(self, image: np.ndarray) -> None:
+        annotations: list[dict] = []
+        detections: list[dict] = []
+        error = None
+        try:
+            with self._inference_lock:
+                _, detections = self.engine.process_frame(image, log_to_db=True)
+                annotations = [
+                    dict(item) for item in self.engine.cached_annotations
+                ]
+            message = (
+                f"Detected {len(detections)} plate candidate(s) in the latest frame."
+                if detections
+                else "No plate detected in the latest processed frame."
+            )
+        except Exception as exc:
+            LOGGER.exception("Live ANPR frame processing failed.")
+            error = f"{type(exc).__name__}: {exc}"
+            message = "Live frame processing failed. Stop and restart after resolving the error."
+
+        with self._state_lock:
+            self._annotations = annotations
+            self._detections = [dict(item) for item in detections]
+            self._error = error
+            self._message = message
+            self._processing = False
+
+    def on_ended(self) -> None:
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def _create_live_video_processor(
+    shared_engine: ANPREngine,
+    frame_interval_seconds: float
+) -> LiveANPRVideoProcessor:
+    # Keep tracking state per WebRTC session while sharing loaded models and their lock.
+    stream_engine = ANPREngine(
+        detector=shared_engine.detector,
+        ocr_reader=shared_engine.ocr_reader
+    )
+    stream_engine.image_inference_lock = shared_engine.image_inference_lock
+    stream_engine.lock = shared_engine.lock
+    stream_engine.recent_detections = shared_engine.recent_detections
+    return LiveANPRVideoProcessor(
+        stream_engine,
+        shared_engine.image_inference_lock,
+        frame_interval_seconds
+    )
+
+
+def _render_live_camera_status(context: Any) -> None:
+    if not context.state.playing:
+        if context.state.signalling:
+            st.info("Connecting to the browser camera. Allow camera access if prompted.")
+        else:
+            st.info(
+                "Press START and allow camera permission. If access was denied, "
+                "allow it in the browser's site settings and restart the stream. "
+                "Use a modern browser with WebRTC camera support."
+            )
+        return
+
+    processor = context.video_processor
+    if not isinstance(processor, LiveANPRVideoProcessor):
+        st.caption("Live stream connected; waiting for the first processed frame.")
+        return
+
+    snapshot = processor.get_snapshot()
+    if snapshot["error"]:
+        st.error(f"Live ANPR error: {snapshot['error']}")
+        return
+
+    st.caption(snapshot["message"])
+    for detection in snapshot["detections"]:
+        save_status = "saved to history" if detection["logged"] else "observing"
+        st.write(
+            f"**{detection['plate_number']}** · OCR "
+            f"{detection['confidence']:.1%} · **{detection['status']}** · "
+            f"{save_status}"
+        )
+
+
+@st.fragment(run_every=1.0)
+def _render_live_camera_status_fragment(context: Any) -> None:
+    _render_live_camera_status(context)
+
+
+def _render_live_camera() -> None:
+    st.subheader("LIVE CAMERA")
+    st.write(
+        "This is browser-to-server WebRTC video from the device using this page, "
+        "not the Streamlit server's webcam. On supported phones it requests the "
+        "rear-facing camera."
+    )
+    st.caption(
+        "Requires HTTPS (or localhost during development) and browser camera permission. "
+        "Use START/STOP to control the stream. If it cannot start, check browser "
+        "camera permission and WebRTC support. The video remains live while ANPR "
+        "runs on selected frames."
+    )
+    frame_interval = st.slider(
+        "ANPR frame interval (seconds)",
+        min_value=0.5,
+        max_value=2.0,
+        value=1.0,
+        step=0.25,
+        key="live_anpr_frame_interval"
+    )
+
+    try:
+        shared_engine = get_anpr_engine()
+    except (FileNotFoundError, ImportError, OSError, RuntimeError, MemoryError) as exc:
+        st.error(f"Could not initialize YOLOv8/EasyOCR for live detection: {exc}")
+        return
+
+    def processor_factory() -> LiveANPRVideoProcessor:
+        return _create_live_video_processor(shared_engine, frame_interval)
+
+    context = webrtc_streamer(
+        key="anpr-live-camera",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=WEBRTC_RTC_CONFIGURATION,
+        media_stream_constraints={
+            "video": {
+                "facingMode": {"ideal": "environment"},
+                "width": {"ideal": 1280},
+                "height": {"ideal": 720}
+            },
+            "audio": False
+        },
+        video_processor_factory=processor_factory,
+        async_processing=True,
+        video_receiver_size=1,
+        sendback_audio=False
+    )
+    processor = context.video_processor
+    if isinstance(processor, LiveANPRVideoProcessor):
+        processor.set_frame_interval(frame_interval)
+
+    _render_live_camera_status_fragment(context)
+
+
+def _render_cctv_ip_camera_info() -> None:
+    st.subheader("CCTV/IP Camera (RTSP)")
+    st.warning(
+        "RTSP CCTV is separate from browser WebRTC. Use the existing Flask camera "
+        "workflow on a computer that can reach the authorized camera network."
+    )
+    st.write(
+        "Run the Flask app locally, then use its Camera Source field for the RTSP "
+        "stream and its existing Start control. Private LAN cameras are generally "
+        "not reachable from Streamlit Community Cloud."
+    )
+    st.code("python app.py")
+    st.caption(
+        "Do not commit, share, or paste credential-bearing RTSP URLs into public "
+        "deployment settings."
+    )
 
 
 def decode_uploaded_image(image_bytes: bytes) -> np.ndarray:
@@ -165,17 +410,25 @@ def _render_dashboard() -> None:
 
 def _render_image_recognition() -> None:
     st.title("Vehicle Image Recognition")
+    input_method = st.radio(
+        "ANPR input",
+        ["Upload Image", "Mobile Camera", "LIVE CAMERA", "CCTV/IP Camera"],
+        horizontal=False,
+        key="anpr_input_method"
+    )
+
+    if input_method == "LIVE CAMERA":
+        _render_live_camera()
+        return
+    if input_method == "CCTV/IP Camera":
+        _render_cctv_ip_camera_info()
+        return
+
     st.write(
         "Upload a vehicle image or capture a still photo with your device camera. "
         "Both input methods use the existing YOLOv8 and EasyOCR pipeline."
     )
     st.caption(f"Selected model: `{YOLO_MODEL_PATH.name}` · CPU inference")
-    input_method = st.radio(
-        "ANPR input",
-        ["Upload Image", "Mobile Camera"],
-        horizontal=True,
-        key="anpr_input_method"
-    )
 
     if input_method == "Mobile Camera":
         st.caption(
@@ -364,16 +617,16 @@ def _render_about() -> None:
     st.title("About this system")
     st.write(
         "The Streamlit interface reuses the repository's existing ANPR components. "
-        "It accepts uploaded images or single browser camera captures without "
-        "automatically starting a server-side camera."
+        "It accepts uploads, still browser captures, and continuous browser WebRTC "
+        "video without automatically starting a server-side camera."
     )
     st.subheader("Recognition pipeline")
     columns = st.columns(4)
     for column, step, detail in zip(
         columns,
-        ["Upload or capture", "YOLOv8", "EasyOCR", "Indian validation"],
+        ["Upload or stream", "YOLOv8", "EasyOCR", "Indian validation"],
         [
-            "Decode and validate an upload or captured still image.",
+            "Decode a still image or sample a live browser video stream.",
             "Load the trained plate detector and crop each candidate.",
             "Reuse multi-variant preprocessing and character recognition.",
             "Validate the OCR output and store the result for review."
@@ -386,8 +639,9 @@ def _render_about() -> None:
     st.write("Python · Streamlit · YOLOv8 · EasyOCR · OpenCV · SQLite")
     st.info(
         "The original Flask dashboard and local camera workflow remain available via "
-        "`python app.py`. Streamlit Community Cloud cannot access a webcam attached "
-        "to the server. SQLite files on Community Cloud are ephemeral; use an external "
+        "`python app.py`. WebRTC uses the browser client's camera; it does not access "
+        "the Streamlit server's webcam. Authorized RTSP CCTV remains a separate local "
+        "Flask mode. SQLite files on Community Cloud are ephemeral; use an external "
         "persistent database if history must survive app restarts."
     )
     st.caption(f"Streamlit database path: `{DATABASE_PATH}`")
@@ -441,7 +695,7 @@ def main() -> None:
             label_visibility="collapsed"
         )
         st.divider()
-        st.caption("Cloud uses uploaded images or browser camera still captures.")
+        st.caption("Cloud camera modes use the browser device, not a server webcam.")
 
     if page == "Dashboard":
         _render_dashboard()

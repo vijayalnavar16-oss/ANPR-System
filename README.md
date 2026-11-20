@@ -103,7 +103,7 @@ flowchart TD
 ```
 .
 ├── app.py                     # Flask web server & REST API endpoints
-├── streamlit_app.py           # Streamlit upload/mobile-camera ANPR dashboard
+├── streamlit_app.py           # Streamlit upload and live-camera ANPR dashboard
 ├── config.py                  # Global application & camera configuration
 ├── requirements.txt           # Python dependency specifications
 ├── .streamlit/config.toml      # Streamlit theme and local server settings
@@ -177,12 +177,12 @@ uv sync
 
 ### 3. Run the Streamlit application
 
-The Streamlit app accepts uploaded images or a single still photo captured with
-the browser camera. On supported mobile browsers, use Streamlit's switch-camera
-control to select the rear camera. Camera access requires HTTPS on the deployed
-site (localhost is also a secure context); it does not provide continuous video.
-The app copies the local SQLite database into `database/anpr_streamlit.db` the
-first time it starts. The original
+The Streamlit app supports image upload, a single still photo through Mobile
+Camera, and continuous LIVE CAMERA via browser WebRTC. Live Camera requests the
+rear-facing camera on supported mobile browsers and processes sampled frames
+without blocking video callbacks. Browser camera access requires HTTPS on the
+deployed site (localhost is also a secure context). The app copies the local
+SQLite database into `database/anpr_streamlit.db` the first time it starts. The original
 `database/anpr.db` is opened read-only for this initial copy and is never used
 for Streamlit writes. Both database files are ignored by Git.
 
@@ -190,10 +190,18 @@ for Streamlit writes. Both database files are ignored by Git.
 streamlit run streamlit_app.py --server.port 8501
 ```
 
-Open `http://localhost:8501`. The first image analysis loads the trained YOLOv8
-model and EasyOCR reader; this can take a few minutes on CPU. The custom model
-is preferred; if it is unavailable or finds no accepted plate in an image, the
+Open `http://localhost:8501`. The first image or live-camera analysis loads the
+trained YOLOv8 model and EasyOCR reader; this can take a few minutes on CPU. The
+custom model is preferred; if it is unavailable or finds no accepted plate, the
 existing fallback model is tried.
+
+The LIVE CAMERA component provides its own Start/Stop controls. It requests
+`facingMode: environment` where the mobile browser supports it, uses a public
+STUN server for WebRTC negotiation, and commits detections through the existing
+multi-frame tracker and duplicate suppression. Some restrictive networks may
+also require a TURN relay. Stop prevents new frame submissions and waits for
+any in-flight inference to finish before cleanup. No camera or TURN credentials
+are stored in the repository.
 
 To select another Streamlit database copy, set `ANPR_STREAMLIT_DATABASE_PATH`
 before launching. Streamlit always redirects database writes to this separate
@@ -224,6 +232,10 @@ path; it refuses to use the original `database/anpr.db` as its write target.
 7. Community Cloud uses `uv.lock` for the Streamlit app. It installs only the
    headless OpenCV wheel on Linux, so no OpenGL/GLib apt packages are required.
    `requirements.txt` remains for the existing Flask Render service.
+8. The phone's LIVE CAMERA stream is sent from the browser over WebRTC; Cloud
+   cannot open the server's webcam. Allow camera permission and use the HTTPS
+   app URL. If WebRTC cannot connect on a restrictive network, a TURN relay may
+   be required.
 
 The custom YOLOv8 weights (24.5 MB) and fallback weights (6.2 MB) are already
 stored in the repository; each file is below GitHub's 100 MB file limit.
@@ -232,12 +244,18 @@ history starts empty. Its local filesystem is ephemeral and history may be
 reset after an app rebuild or restart. Persistent history requires a separate
 persistent database service.
 
-The Streamlit app performs CPU inference. Its Mobile Camera option captures one
-browser photo; it does not start continuous video or access a camera attached to
-the cloud server. The free cloud instance has limited memory; if model
-initialization runs out of memory, try a smaller image or use a machine with
-more memory. The original Flask app's laptop webcam, iVCam, and IP/RTSP camera
-features remain separate and unchanged.
+The Streamlit app performs CPU inference. Mobile Camera captures one browser
+photo; LIVE CAMERA processes sampled WebRTC frames. Neither mode opens hardware
+attached to the cloud server. The free cloud instance has limited memory; if
+model initialization runs out of memory, try a smaller image or use a machine
+with more memory. The original Flask app's laptop webcam and iVCam remain
+separate. For authorized CCTV/IP RTSP cameras, run Flask locally on a computer
+with network access to the camera, then use its Camera Source field and Start
+control. Private LAN streams are generally unreachable from Community Cloud.
+
+Do not commit or share an RTSP URL containing credentials. Keep RTSP access on a
+trusted local network; the Cloud LIVE CAMERA input is a separate browser WebRTC
+source and does not accept RTSP URLs.
 
 ### 5. Run the existing Flask application
 
