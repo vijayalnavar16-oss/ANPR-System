@@ -1,0 +1,9 @@
+# Ultralytics YOLOv8 Indian License Plate Dataset Configuration
+path: D:/5th sem/MLDL Project/dataset
+train: images/train
+val: images/val
+test: images/test
+
+# Classes
+names:
+  0: license_plate

@@ -1,0 +1,281 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Based Automatic Number Plate Recognition (ANPR)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Top Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <div class="brand">
+                <i class="fa-solid fa-car-side logo-icon"></i>
+                <div>
+                    <h1>AI-Based Automatic Number Plate Recognition</h1>
+                    <p class="subtitle">Real-Time YOLOv8 & EasyOCR Surveillance Dashboard</p>
+                </div>
+            </div>
+            <div class="system-status">
+                <span id="cameraStatusPill" class="status-pill {% if camera_running %}online{% else %}offline{% endif %}">
+                    <i class="fa-solid fa-circle"></i>
+                    <span id="cameraStatusText">{% if camera_running %}Camera Active{% else %}Camera Inactive{% endif %}</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <div class="dashboard-wrapper">
+        <!-- Overview Stat Cards -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon blue"><i class="fa-solid fa-camera"></i></div>
+                <div class="stat-info">
+                    <h3 id="statTotal">{{ stats.total_detected }}</h3>
+                    <p>Total Vehicles Detected</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon purple"><i class="fa-solid fa-calendar-day"></i></div>
+                <div class="stat-info">
+                    <h3 id="statToday">{{ stats.today_entries }}</h3>
+                    <p>Today's Vehicle Entries</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="stat-info">
+                    <h3 id="statValid">{{ stats.valid_plates }}</h3>
+                    <p>Validated Plates</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon amber"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                <div class="stat-info">
+                    <h3 id="statPending">{{ stats.pending_verification }}</h3>
+                    <p>Pending Verification</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon red"><i class="fa-solid fa-ban"></i></div>
+                <div class="stat-info">
+                    <h3 id="statRejected">{{ stats.rejected_detections }}</h3>
+                    <p>Rejected Detections</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Dashboard Split Grid -->
+        <div class="main-grid">
+            <!-- Left Panel: Live Monitoring -->
+            <section class="card monitoring-panel">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-video"></i> Live Camera Feed</h2>
+                    <div class="camera-actions">
+                        <button id="btnStartCam" class="btn btn-sm btn-success" {% if camera_running %}style="display:none;"{% endif %}>
+                            <i class="fa-solid fa-play"></i> Start
+                        </button>
+                        <button id="btnStopCam" class="btn btn-sm btn-danger" {% if not camera_running %}style="display:none;"{% endif %}>
+                            <i class="fa-solid fa-stop"></i> Stop
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Video Stream Container -->
+                <div class="video-wrapper">
+                    <img id="liveStream" src="{{ url_for('video_feed') }}" alt="Live Feed" onerror="handleStreamError(this);">
+                </div>
+
+                <!-- Camera Configuration Bar -->
+                <div class="camera-config-bar">
+                    <div class="quick-camera-buttons">
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="selectQuickSource(0);">
+                            <i class="fa-solid fa-laptop"></i> Laptop Webcam (0)
+                        </button>
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="selectQuickSource(1);">
+                            <i class="fa-solid fa-mobile-screen"></i> Phone Camera / iVCam (1)
+                        </button>
+                    </div>
+                    <div class="input-group" style="margin-top: 8px;">
+                        <label for="cameraSourceInput"><i class="fa-solid fa-gear"></i> Source:</label>
+                        <input type="text" id="cameraSourceInput" value="{{ camera_source }}" placeholder="0 (Laptop), 1 (iVCam), or IP stream URL">
+                        <button id="btnApplySource" class="btn btn-sm btn-secondary">Apply</button>
+                    </div>
+                    <!-- Frame Orientation / Rotation Controls -->
+                    <div class="rotation-control-bar" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.8rem; color: #94a3b8;"><i class="fa-solid fa-rotate"></i> Rotate:</span>
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="setRotation(0);">0° (Normal)</button>
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="setRotation(90);">90°</button>
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="setRotation(180);">180°</button>
+                        <button type="button" class="btn btn-xs btn-cam-quick" onclick="setRotation(270);">270°</button>
+                    </div>
+                    <span class="source-hint">Supports laptop webcam (0), phone camera via iVCam (1), or Android IP stream URL with rotation support.</span>
+                </div>
+
+                <!-- Latest Live Detection Banner -->
+                <div class="latest-detection-card">
+                    <div class="latest-header">
+                        <span class="pulse-indicator"></span>
+                        <h3>Latest Detection</h3>
+                        <span id="latestTimestamp" class="time-badge">—</span>
+                    </div>
+                    <div class="latest-body">
+                        <div class="latest-plate-box">
+                            <span id="latestPlateNumber" class="plate-text">Waiting for vehicle...</span>
+                        </div>
+                        <div class="latest-meta">
+                            <div><strong>Raw OCR:</strong> <span id="latestRawText">—</span></div>
+                            <div><strong>Confidence:</strong> <span id="latestConfidence">—</span></div>
+                            <div><strong>Status:</strong> <span id="latestStatusBadge" class="badge">IDLE</span></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Vehicle History & Search -->
+            <section class="card history-panel">
+                <div class="card-header">
+                    <h2><i class="fa-solid fa-clock-rotate-left"></i> Vehicle Log History</h2>
+                    <button id="btnRefreshLogs" class="btn btn-sm btn-icon" title="Refresh Table">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </button>
+                </div>
+
+                <!-- Search and Filters Bar -->
+                <div class="filter-bar">
+                    <div class="filter-item search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="filterSearch" placeholder="Search plate (e.g. KA25)...">
+                    </div>
+                    <div class="filter-item">
+                        <input type="date" id="filterDate">
+                    </div>
+                    <div class="filter-item">
+                        <select id="filterStatus">
+                            <option value="ALL">All Statuses</option>
+                            <option value="VALID_INDIAN_PLATE">Valid Plates</option>
+                            <option value="PENDING_RECHECK">Pending Recheck</option>
+                            <option value="REJECTED_INVALID_FORMAT">Invalid Format</option>
+                            <option value="REJECTED_WATERMARK">Watermark</option>
+                            <option value="MANUAL_VERIFICATION">Needs Review</option>
+                            <option value="CONFIRMED">Confirmed</option>
+                            <option value="REJECTED">Rejected</option>
+                            <option value="UNREADABLE">Unreadable</option>
+                        </select>
+                    </div>
+                    <button id="btnResetFilters" class="btn btn-sm btn-secondary">Reset</button>
+                </div>
+
+                <!-- Records Table -->
+                <div class="table-container">
+                    <table id="recordsTable">
+                        <thead>
+                            <tr>
+                                <th>Plate</th>
+                                <th>Image</th>
+                                <th>Confidence</th>
+                                <th>Date & Time</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recordsBody">
+                            {% for rec in records %}
+                            <tr data-id="{{ rec.id }}">
+                                <td>
+                                    <span class="badge plate">{{ rec.plate_number }}</span>
+                                    {% if rec.raw_text and rec.raw_text != rec.plate_number %}
+                                    <div class="text-xs text-muted">Raw: {{ rec.raw_text }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if rec.image_path %}
+                                    <img src="/image_view?path={{ rec.image_path }}" class="plate-thumb" alt="Plate" onclick="openImageModal(this.src);">
+                                    {% else %}
+                                    <span class="text-muted text-xs">No image</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-xs">{{ rec.registration_type or '-' }}</td>
+                                <td>{{ "%.1f"|format(rec.confidence * 100) }}%</td>
+                                <td class="text-xs">{% if rec.detection_confidence %}{{ "%.0f"|format(rec.detection_confidence * 100) }}%{% else %}�{% endif %}</td>
+                                <td class="text-xs">{{ rec.frame_count or '-' }}</td>
+                                <td class="text-xs">{{ rec.timestamp }}</td>
+                                <td>
+                                    <span class="status-badge status-{{ rec.verification_status|lower }}">
+                                        {{ rec.verification_status }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-xs btn-review" onclick='openVerifyModal({{ rec|tojson }});'>
+                                        <i class="fa-solid fa-pen-to-square"></i> Review
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr id="emptyRow">
+                                <td colspan="9" class="text-center text-muted">No vehicle records found.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Verification & Manual Audit Modal -->
+    <div id="verifyModal" class="modal-backdrop">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-user-check"></i> Manual Plate Verification & Audit</h3>
+                <button class="btn-close" onclick="closeVerifyModal();">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-split">
+                    <div class="modal-img-container">
+                        <img id="modalPlateImg" src="" alt="Cropped Plate">
+                    </div>
+                    <div class="modal-fields">
+                        <input type="hidden" id="modalRecordId">
+                        
+                        <div class="form-group">
+                            <label>Original OCR Raw Reading:</label>
+                            <input type="text" id="modalRawText" readonly class="input-readonly">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Registration Number (Editable):</label>
+                            <input type="text" id="modalPlateNumber" class="input-editable" placeholder="e.g. KA25AB1234">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Audit Notes:</label>
+                            <textarea id="modalNotes" rows="2" placeholder="Reason for change / verification details..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeVerifyModal();">Cancel</button>
+                <button class="btn btn-danger" onclick="submitVerification('REJECT');">
+                    <i class="fa-solid fa-xmark"></i> Reject
+                </button>
+                <button class="btn btn-success" onclick="submitVerification('CONFIRM');">
+                    <i class="fa-solid fa-check"></i> Confirm & Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="imageModal" class="modal-backdrop" onclick="closeImageModal();">
+        <div class="image-preview-container">
+            <img id="previewModalImg" src="" alt="Full Preview">
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

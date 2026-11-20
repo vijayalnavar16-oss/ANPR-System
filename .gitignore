@@ -1,0 +1,40 @@
+# Python virtual environments
+venv/
+env/
+ENV/
+.env
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# YOLO training checkpoints and runs
+runs/
+yolo*.pt
+license_plate_detector.pt
+
+# Backups
+ANPR_Project_Backup/
+backups_pre_master/
+test_output/
+eval_reports/
+
+# Runtime database and captured plate logs
+database/*.db
+
+# Allow model in models directory
+!models/license_plate_detector.pt
+
+# Temporary captured frames
+static/captures/*.jpg
+static/captures/*.png
+!static/captures/.gitkeep
+
+# IDE and OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+esp32_safety_portfolio/
