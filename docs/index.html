@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101522">
+  <meta name="description" content="AI-based Automatic Number Plate Recognition for Indian vehicles.">
+  <title>Indian ANPR | Project Overview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101522;
+      color: #eef2ff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.65; }
+    a { color: #8db4ff; }
+    .wrap { width: min(1040px, calc(100% - 40px)); margin: 0 auto; }
+    header { padding: 22px 0; border-bottom: 1px solid #293247; }
+    nav { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    nav a { text-decoration: none; }
+    .brand { color: #fff; font-weight: 750; letter-spacing: .03em; }
+    .hero { padding: 84px 0 64px; }
+    .eyebrow { color: #80dbc5; font-size: .82rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { max-width: 760px; margin: 14px 0; font-size: clamp(2.4rem, 7vw, 4.7rem); line-height: 1.08; letter-spacing: -.045em; }
+    .lead { max-width: 720px; color: #b6c1d5; font-size: 1.15rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .button { display: inline-block; padding: 11px 17px; border: 1px solid #465574; border-radius: 9px; color: #fff; font-weight: 650; text-decoration: none; }
+    .button.primary { border-color: #537deb; background: #537deb; }
+    section { padding: 36px 0; }
+    h2 { font-size: 1.65rem; letter-spacing: -.02em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+    .card { padding: 20px; border: 1px solid #293247; border-radius: 12px; background: #151d2c; }
+    .card h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .card p, .note { margin: 0; color: #b6c1d5; }
+    .note { padding: 18px 20px; border-left: 3px solid #e8ad5a; border-radius: 5px; background: #1d2230; }
+    footer { margin-top: 45px; padding: 24px 0; border-top: 1px solid #293247; color: #9eabc1; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="wrap" aria-label="Main navigation">
+      <a class="brand" href="./">INDIAN ANPR</a>
+      <a href="https://github.com/vijayalnavar16-oss/ANPR-System">View source on GitHub</a>
+    </nav>
+  </header>
+  <main class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Computer vision · Flask · YOLOv8 · EasyOCR</div>
+      <h1>Automatic number plate recognition for Indian vehicles.</h1>
+      <p class="lead">An academic project combining plate detection, OCR, Indian registration validation, and a web dashboard for vehicle-log review.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/vijayalnavar16-oss/ANPR-System">Explore the source code</a>
+        <a class="button" href="https://github.com/vijayalnavar16-oss/ANPR-System#quickstart-guide">Run locally</a>
+      </div>
+    </section>
+    <section>
+      <h2>How it works</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>1. Detect</h3>
+          <p>YOLOv8 locates candidate registration plates in camera frames.</p>
+        </article>
+        <article class="card">
+          <h3>2. Read</h3>
+          <p>Image preprocessing and EasyOCR extract text from each plate crop.</p>
+        </article>
+        <article class="card">
+          <h3>3. Validate</h3>
+          <p>Registration text is checked against Indian plate formats, then reviewed in the Flask dashboard.</p>
+        </article>
+      </div>
+    </section>
+    <section>
+      <h2>About this GitHub Pages site</h2>
+      <p class="note">This page is a static project overview. GitHub Pages cannot run the Python/Flask backend, connect to your webcam or iVCam, perform live ANPR, or provide the SQLite API. To use the complete application, follow the local setup instructions in the repository README.</p>
+    </section>
+  </main>
+  <footer>
+    <div class="wrap">AI-Based Automatic Number Plate Recognition System · <a href="https://github.com/vijayalnavar16-oss/ANPR-System">GitHub repository</a></div>
+  </footer>
+</body>
+</html>
