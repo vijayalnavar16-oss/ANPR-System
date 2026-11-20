@@ -170,8 +170,9 @@ python -m venv venv
 # On Linux/macOS:
 source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install uv and dependencies (uv applies the OpenCV dependency exclusions in uv.toml)
+python -m pip install uv
+uv pip install -r requirements.txt
 ```
 
 ### 3. Run the Streamlit application
@@ -207,7 +208,9 @@ path; it refuses to use the original `database/anpr.db` as its write target.
 3. Choose **Create app** → **Yup, I have an app**.
 4. Select repository `vijayalnavar16-oss/ANPR-System`, branch
    `streamlit-deployment`, and main file `streamlit_app.py`.
-5. In **Advanced settings**, choose Python 3.12, then deploy.
+5. In **Advanced settings**, choose Python 3.12, then deploy. The repository
+   dependencies are validated for Python 3.12; changing this file does not
+   change the Python version selected by an existing Cloud app.
 6. Wait for the package build to finish. On the first **Run plate recognition**,
    the app loads the YOLO models and EasyOCR automatically downloads its CRAFT
    detector and English recognition weights. This first analysis can take a few
