@@ -53,17 +53,19 @@ def _configure_streamlit_database() -> Path:
 STREAMLIT_DATABASE_PATH = _configure_streamlit_database()
 
 from config import DATABASE_PATH, YOLO_MODEL_PATH  # noqa: E402
+if DATABASE_PATH.resolve() != STREAMLIT_DATABASE_PATH.resolve():
+    raise RuntimeError(
+        "ANPR_DATABASE_PATH was initialized before Streamlit selected its isolated database."
+    )
+
 from database.db_handler import (  # noqa: E402
     get_all_records,
     get_record_by_id,
     get_summary_stats,
-    init_db,
     search_and_filter_records,
     update_record_manual_verification,
 )
 from modules.anpr_engine import ANPREngine  # noqa: E402
-
-init_db()
 
 
 @st.cache_resource(show_spinner="Loading the YOLOv8 and EasyOCR models...")

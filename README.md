@@ -208,8 +208,11 @@ path; it refuses to use the original `database/anpr.db` as its write target.
 4. Select repository `vijayalnavar16-oss/ANPR-System`, branch
    `streamlit-deployment`, and main file `streamlit_app.py`.
 5. In **Advanced settings**, choose Python 3.12, then deploy.
-6. Wait for the first build and model initialization to complete. Community
-   Cloud downloads the package dependencies and EasyOCR recognition weights.
+6. Wait for the package build to finish. On the first **Run plate recognition**,
+   the app loads the YOLO models and EasyOCR automatically downloads its CRAFT
+   detector and English recognition weights. This first analysis can take a few
+   minutes; the cached models are reused for later analyses in the same app
+   process.
 
 The custom YOLOv8 weights (24.5 MB) and fallback weights (6.2 MB) are already
 stored in the repository; each file is below GitHub's 100 MB file limit.

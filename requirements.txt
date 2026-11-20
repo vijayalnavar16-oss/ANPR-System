@@ -1,8 +1,9 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 streamlit==1.65.0
-opencv-python==5.0.0.93; sys_platform == "win32"
-opencv-python-headless==5.0.0.93; sys_platform != "win32"
+# Ultralytics and EasyOCR require distinct OpenCV distribution names; keep them aligned.
+opencv-python==5.0.0.93
+opencv-python-headless==5.0.0.93
 torch==2.14.1+cpu
 torchvision==0.29.1+cpu
 ultralytics==8.4.175

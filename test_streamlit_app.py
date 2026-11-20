@@ -9,13 +9,15 @@ from unittest import mock
 
 import cv2
 import numpy as np
-from config import FALLBACK_YOLO_MODEL_PATH
-from modules.detector import VehiclePlateDetector
 
 os.environ.setdefault(
     "ANPR_STREAMLIT_DATABASE_PATH",
     str(Path(tempfile.gettempdir()) / "anpr_streamlit_tests.db")
 )
+os.environ["ANPR_DATABASE_PATH"] = os.environ["ANPR_STREAMLIT_DATABASE_PATH"]
+
+from config import FALLBACK_YOLO_MODEL_PATH
+from modules.detector import VehiclePlateDetector
 
 import streamlit_app
 from database import db_handler
