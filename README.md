@@ -103,7 +103,7 @@ flowchart TD
 ```
 .
 ├── app.py                     # Flask web server & REST API endpoints
-├── streamlit_app.py           # Streamlit upload-based ANPR dashboard
+├── streamlit_app.py           # Streamlit upload/mobile-camera ANPR dashboard
 ├── config.py                  # Global application & camera configuration
 ├── requirements.txt           # Python dependency specifications
 ├── .streamlit/config.toml      # Streamlit theme and local server settings
@@ -177,8 +177,12 @@ uv sync
 
 ### 3. Run the Streamlit application
 
-The Streamlit app uses uploaded images and copies the local SQLite database into
-`database/anpr_streamlit.db` the first time it starts. The original
+The Streamlit app accepts uploaded images or a single still photo captured with
+the browser camera. On supported mobile browsers, use Streamlit's switch-camera
+control to select the rear camera. Camera access requires HTTPS on the deployed
+site (localhost is also a secure context); it does not provide continuous video.
+The app copies the local SQLite database into `database/anpr_streamlit.db` the
+first time it starts. The original
 `database/anpr.db` is opened read-only for this initial copy and is never used
 for Streamlit writes. Both database files are ignored by Git.
 
@@ -228,10 +232,12 @@ history starts empty. Its local filesystem is ephemeral and history may be
 reset after an app rebuild or restart. Persistent history requires a separate
 persistent database service.
 
-The Streamlit app performs CPU inference and does not start a webcam or IP
-camera. The free cloud instance has limited memory; if model initialization
-runs out of memory, try a smaller image or use a machine with more memory.
-The existing Flask app and its local camera features remain separate.
+The Streamlit app performs CPU inference. Its Mobile Camera option captures one
+browser photo; it does not start continuous video or access a camera attached to
+the cloud server. The free cloud instance has limited memory; if model
+initialization runs out of memory, try a smaller image or use a machine with
+more memory. The original Flask app's laptop webcam, iVCam, and IP/RTSP camera
+features remain separate and unchanged.
 
 ### 5. Run the existing Flask application
 

@@ -3,6 +3,8 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import nullcontext
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -148,6 +150,56 @@ class StreamlitHelperTests(unittest.TestCase):
             self.assertEqual(copied_count, 1)
             self.assertEqual(source_path.read_bytes(), original_hash)
             self.assertTrue(target_path.is_file())
+
+    def test_mobile_camera_capture_uses_existing_image_pipeline(self):
+        image_bytes = b"captured jpeg bytes"
+        image = np.zeros((80, 200, 3), dtype=np.uint8)
+        capture = BytesIO(image_bytes)
+        engine = mock.Mock()
+        engine.process_image.return_value = {
+            "success": True,
+            "model_used": "license_plate_detector.pt",
+            "annotated_image": image,
+            "detections": []
+        }
+        session_state = {}
+
+        with (
+            mock.patch.object(streamlit_app.st, "title"),
+            mock.patch.object(streamlit_app.st, "write"),
+            mock.patch.object(
+                streamlit_app.st, "radio", return_value="Mobile Camera"
+            ) as input_selector,
+            mock.patch.object(streamlit_app.st, "caption"),
+            mock.patch.object(
+                streamlit_app.st, "camera_input", return_value=capture
+            ) as camera_input,
+            mock.patch.object(streamlit_app.st, "file_uploader") as file_uploader,
+            mock.patch.object(streamlit_app.st, "info"),
+            mock.patch.object(streamlit_app.st, "image"),
+            mock.patch.object(streamlit_app.st, "button", return_value=True),
+            mock.patch.object(
+                streamlit_app.st, "spinner", return_value=nullcontext()
+            ),
+            mock.patch.object(streamlit_app.st, "subheader"),
+            mock.patch.object(streamlit_app.st, "error"),
+            mock.patch.object(streamlit_app.st, "session_state", session_state),
+            mock.patch.object(
+                streamlit_app, "decode_uploaded_image", return_value=image
+            ) as decode_image,
+            mock.patch.object(
+                streamlit_app, "get_anpr_engine", return_value=engine
+            ),
+        ):
+            streamlit_app._render_image_recognition()
+
+        self.assertIn("Mobile Camera", input_selector.call_args.args[1])
+        self.assertEqual(camera_input.call_args.kwargs["resolution"], "1080p")
+        file_uploader.assert_not_called()
+        decode_image.assert_called_once_with(image_bytes)
+        engine.process_image.assert_called_once_with(
+            image, log_to_db=True, device="cpu"
+        )
 
     def test_empty_streamlit_database_can_be_initialized(self):
         with tempfile.TemporaryDirectory() as temp_dir:

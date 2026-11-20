@@ -166,20 +166,44 @@ def _render_dashboard() -> None:
 def _render_image_recognition() -> None:
     st.title("Vehicle Image Recognition")
     st.write(
-        "Upload a vehicle image. The existing YOLOv8 detector finds plate crops, "
-        "and the existing EasyOCR pipeline reads and validates each plate."
+        "Upload a vehicle image or capture a still photo with your device camera. "
+        "Both input methods use the existing YOLOv8 and EasyOCR pipeline."
     )
     st.caption(f"Selected model: `{YOLO_MODEL_PATH.name}` · CPU inference")
-    uploaded_file = st.file_uploader(
-        "Choose a JPG, JPEG, or PNG image (maximum 15 MB)",
-        type=["jpg", "jpeg", "png"],
-        key="vehicle_image"
+    input_method = st.radio(
+        "ANPR input",
+        ["Upload Image", "Mobile Camera"],
+        horizontal=True,
+        key="anpr_input_method"
     )
-    if uploaded_file is None:
-        st.info("Image upload is the supported input for this cloud-ready dashboard.")
+
+    if input_method == "Mobile Camera":
+        st.caption(
+            "Camera access requires HTTPS (localhost is also supported). On mobile, "
+            "use the switch-camera control to select the rear camera where supported. "
+            "This captures a still image; it does not stream video."
+        )
+        image_file = st.camera_input(
+            "Capture vehicle image",
+            key="mobile_vehicle_camera",
+            help="Take one still photo. Allow camera access when your browser asks.",
+            resolution="1080p",
+            width="stretch"
+        )
+        image_caption = "Mobile camera capture"
+    else:
+        image_file = st.file_uploader(
+            "Choose a JPG, JPEG, or PNG image (maximum 15 MB)",
+            type=["jpg", "jpeg", "png"],
+            key="vehicle_image"
+        )
+        image_caption = "Uploaded image"
+
+    if image_file is None:
+        st.info("Upload an image or choose Mobile Camera to capture a still photo.")
         return
 
-    image_bytes = uploaded_file.getvalue()
+    image_bytes = image_file.getvalue()
     try:
         image = decode_uploaded_image(image_bytes)
     except ValueError as exc:
@@ -187,7 +211,7 @@ def _render_image_recognition() -> None:
         return
 
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    st.image(image_rgb, caption="Uploaded image", width="stretch")
+    st.image(image_rgb, caption=image_caption, width="stretch")
     digest = hashlib.sha256(image_bytes).hexdigest()
 
     if st.button("Run plate recognition", type="primary", key="run_anpr"):
@@ -340,15 +364,16 @@ def _render_about() -> None:
     st.title("About this system")
     st.write(
         "The Streamlit interface reuses the repository's existing ANPR components. "
-        "Still-image upload is used instead of automatically starting a server-side camera."
+        "It accepts uploaded images or single browser camera captures without "
+        "automatically starting a server-side camera."
     )
     st.subheader("Recognition pipeline")
     columns = st.columns(4)
     for column, step, detail in zip(
         columns,
-        ["Image upload", "YOLOv8", "EasyOCR", "Indian validation"],
+        ["Upload or capture", "YOLOv8", "EasyOCR", "Indian validation"],
         [
-            "Decode and validate the uploaded image.",
+            "Decode and validate an upload or captured still image.",
             "Load the trained plate detector and crop each candidate.",
             "Reuse multi-variant preprocessing and character recognition.",
             "Validate the OCR output and store the result for review."
@@ -388,6 +413,14 @@ def main() -> None:
         .stButton > button[kind="primary"], .stDownloadButton > button {
             background: #15945d; border-color: #15945d; color: white;
         }
+        @media (max-width: 640px) {
+            .block-container { padding-left: 0.75rem; padding-right: 0.75rem; }
+            [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.75rem; }
+            [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+                min-width: 100% !important;
+            }
+            [data-testid="stRadio"] [role="radiogroup"] { flex-wrap: wrap; }
+        }
         </style>
         """,
         unsafe_allow_html=True
@@ -408,7 +441,7 @@ def main() -> None:
             label_visibility="collapsed"
         )
         st.divider()
-        st.caption("Cloud mode uses uploaded images; it does not start a webcam.")
+        st.caption("Cloud uses uploaded images or browser camera still captures.")
 
     if page == "Dashboard":
         _render_dashboard()
