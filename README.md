@@ -216,6 +216,9 @@ path; it refuses to use the original `database/anpr.db` as its write target.
    detector and English recognition weights. This first analysis can take a few
    minutes; the cached models are reused for later analyses in the same app
    process.
+7. `packages.txt` installs Debian's `libgl1`, which provides `libGL.so.1` for
+   the OpenCV runtime in the current Cloud environment. Linux Python dependency
+   resolution still selects only the headless OpenCV wheel.
 
 The custom YOLOv8 weights (24.5 MB) and fallback weights (6.2 MB) are already
 stored in the repository; each file is below GitHub's 100 MB file limit.
