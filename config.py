@@ -16,12 +16,13 @@ DATABASE_DIR.mkdir(parents=True, exist_ok=True)
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Database Configuration
-DATABASE_PATH = DATABASE_DIR / "anpr.db"
+DATABASE_PATH = Path(os.getenv("ANPR_DATABASE_PATH", str(DATABASE_DIR / "anpr.db"))).expanduser()
 
 # YOLO & Detection Configuration
 # Priority: Custom Indian License Plate model if available, fallback to baseline
 INDIAN_YOLO_MODEL = MODELS_DIR / "indian_license_plate_best.pt"
-YOLO_MODEL_PATH = INDIAN_YOLO_MODEL if INDIAN_YOLO_MODEL.exists() else MODELS_DIR / "license_plate_detector.pt"
+FALLBACK_YOLO_MODEL_PATH = MODELS_DIR / "license_plate_detector.pt"
+YOLO_MODEL_PATH = INDIAN_YOLO_MODEL if INDIAN_YOLO_MODEL.exists() else FALLBACK_YOLO_MODEL_PATH
 DETECTION_CONFIDENCE_THRESHOLD = 0.35
 
 # EasyOCR Configuration

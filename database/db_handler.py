@@ -217,7 +217,7 @@ def get_summary_stats():
     cursor.execute("SELECT COUNT(*) FROM vehicle_logs WHERE verification_status IN ('PENDING_RECHECK', 'MANUAL_VERIFICATION')")
     pending_verification = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM vehicle_logs WHERE verification_status IN ('REJECTED_INVALID_FORMAT', 'REJECTED_WATERMARK', 'UNREADABLE')")
+    cursor.execute("SELECT COUNT(*) FROM vehicle_logs WHERE verification_status IN ('REJECTED', 'REJECTED_INVALID_FORMAT', 'REJECTED_WATERMARK', 'UNREADABLE')")
     rejected_detections = cursor.fetchone()[0]
 
     conn.close()

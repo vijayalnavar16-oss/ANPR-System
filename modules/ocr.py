@@ -195,6 +195,7 @@ class PlateOCRReader:
                 "is_valid": False,
                 "verification_status": "UNREADABLE",
                 "reason": "Empty or corrupted plate crop image.",
+                "preprocessed": None,
                 "db_logged": False
             }
 
@@ -214,6 +215,7 @@ class PlateOCRReader:
                 "is_valid": False,
                 "verification_status": "UNREADABLE",
                 "reason": "Image preprocessing yielded empty output.",
+                "preprocessed": None,
                 "db_logged": False
             }
 
@@ -267,6 +269,7 @@ class PlateOCRReader:
                 "is_valid": False,
                 "verification_status": "UNREADABLE",
                 "reason": "No alphanumeric characters could be detected across any preprocessing variant.",
+                "preprocessed": None,
                 "db_logged": False
             }
             if log_to_db:

@@ -1,10 +1,13 @@
-opencv-python>=4.8.0; sys_platform == "win32"
-opencv-python-headless>=4.8.0; sys_platform != "win32"
-torch>=2.0.0
-torchvision>=0.15.0
-ultralytics>=8.0.0
-flask>=3.0.0
-easyocr>=1.7.0
-numpy>=1.24.0
-pillow>=10.0.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+streamlit==1.65.0
+opencv-python==5.0.0.93; sys_platform == "win32"
+opencv-python-headless==5.0.0.93; sys_platform != "win32"
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+ultralytics==8.4.175
+easyocr==1.7.2
+numpy==2.4.4
+pillow==12.3.0
+flask>=3.0.0,<4.0.0
 gunicorn>=22.0.0,<24.0.0; sys_platform != "win32"

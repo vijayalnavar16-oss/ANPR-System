@@ -24,6 +24,11 @@ eval_reports/
 # Runtime database and captured plate logs
 database/*.db
 
+# Streamlit credentials and local cache
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+.streamlit/cache/
+
 # Allow model in models directory
 !models/license_plate_detector.pt
 

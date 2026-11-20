@@ -2,9 +2,15 @@ import cv2
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 import numpy as np
 
-from config import YOLO_MODEL_PATH, DETECTION_CONFIDENCE_THRESHOLD, CAPTURES_DIR
+from config import (
+    CAPTURES_DIR,
+    DETECTION_CONFIDENCE_THRESHOLD,
+    FALLBACK_YOLO_MODEL_PATH,
+    YOLO_MODEL_PATH
+)
 
 
 class VehiclePlateDetector:
@@ -20,6 +26,7 @@ class VehiclePlateDetector:
         self.model_path = Path(model_path)
         self.conf_threshold = conf_threshold
         self.model = None
+        self.fallback_detector = None
 
     def is_model_available(self) -> bool:
         """Check if the model weight file exists on disk."""
@@ -38,7 +45,13 @@ class VehiclePlateDetector:
             self.model = YOLO(str(self.model_path))
         return self.model
 
-    def detect_plates(self, image_input, save_crops: bool = True, output_dir: Path = CAPTURES_DIR):
+    def detect_plates(
+        self,
+        image_input,
+        save_crops: bool = True,
+        output_dir: Path = CAPTURES_DIR,
+        device: Optional[str] = None
+    ):
         """
         Detect number plates in an input image.
 
@@ -84,7 +97,10 @@ class VehiclePlateDetector:
             self.load_model()
 
         # 2. Run YOLO inference
-        results = self.model(image, conf=self.conf_threshold, verbose=False)
+        inference_options = {"conf": self.conf_threshold, "verbose": False}
+        if device is not None:
+            inference_options["device"] = device
+        results = self.model(image, **inference_options)
 
         detections = []
         annotated_image = image.copy()
@@ -162,9 +178,27 @@ class VehiclePlateDetector:
                     "crop_path": crop_path
                 })
 
-        return {
+        result = {
             "detections": detections,
             "annotated_image": annotated_image,
             "plate_count": len(detections),
-            "success": True
+            "success": True,
+            "model_used": str(self.model_path)
         }
+        if (
+            not detections
+            and self.model_path.resolve() != FALLBACK_YOLO_MODEL_PATH.resolve()
+            and FALLBACK_YOLO_MODEL_PATH.is_file()
+        ):
+            if self.fallback_detector is None:
+                self.fallback_detector = VehiclePlateDetector(
+                    model_path=FALLBACK_YOLO_MODEL_PATH,
+                    conf_threshold=self.conf_threshold
+                )
+            result = self.fallback_detector.detect_plates(
+                image,
+                save_crops=save_crops,
+                output_dir=output_dir,
+                device=device
+            )
+        return result

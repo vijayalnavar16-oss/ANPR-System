@@ -103,10 +103,13 @@ flowchart TD
 ```
 .
 ├── app.py                     # Flask web server & REST API endpoints
+├── streamlit_app.py           # Streamlit upload-based ANPR dashboard
 ├── config.py                  # Global application & camera configuration
 ├── requirements.txt           # Python dependency specifications
+├── .streamlit/config.toml      # Streamlit theme and local server settings
 ├── models/
-│   └── license_plate_detector.pt  # Fine-tuned YOLOv8 Nano weights (~6.2 MB)
+│   ├── indian_license_plate_best.pt # Custom Indian plate weights (~24.5 MB)
+│   └── license_plate_detector.pt    # Fallback plate weights (~6.2 MB)
 ├── modules/
 │   ├── camera.py              # OpenCV VideoCapture manager & rotation handler
 │   ├── detector.py            # YOLOv8 plate detector with coordinate clamping
@@ -146,9 +149,9 @@ flowchart TD
 ## 🚀 Quickstart Guide
 
 ### 1. Prerequisites
-- Python 3.10, 3.11, or 3.12
+- Python 3.12 recommended for Streamlit Community Cloud
 - Git
-- Integrated Webcam or [iVCam](https://www.e2esoft.com/ivcam/) for smartphone streaming
+- A webcam or [iVCam](https://www.e2esoft.com/ivcam/) is optional for the original Flask app
 
 ### 2. Installation
 
@@ -171,7 +174,56 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Running the ANPR Application
+### 3. Run the Streamlit application
+
+The Streamlit app uses uploaded images and copies the local SQLite database into
+`database/anpr_streamlit.db` the first time it starts. The original
+`database/anpr.db` is opened read-only for this initial copy and is never used
+for Streamlit writes. Both database files are ignored by Git.
+
+```bash
+streamlit run streamlit_app.py --server.port 8501
+```
+
+Open `http://localhost:8501`. The first image analysis loads the trained YOLOv8
+model and EasyOCR reader; this can take a few minutes on CPU. The custom model
+is preferred; if it is unavailable or finds no accepted plate in an image, the
+existing fallback model is tried.
+
+To select another Streamlit database copy, set `ANPR_STREAMLIT_DATABASE_PATH`
+before launching. Streamlit always redirects database writes to this separate
+path; it refuses to use the original `database/anpr.db` as its write target.
+
+### 4. Deploy on Streamlit Community Cloud
+
+1. Push the `streamlit-deployment` branch to GitHub:
+
+   ```bash
+   git switch streamlit-deployment
+   git push -u origin streamlit-deployment
+   ```
+
+2. Sign in at [share.streamlit.io](https://share.streamlit.io/) with GitHub.
+3. Choose **Create app** → **Yup, I have an app**.
+4. Select repository `vijayalnavar16-oss/ANPR-System`, branch
+   `streamlit-deployment`, and main file `streamlit_app.py`.
+5. In **Advanced settings**, choose Python 3.12, then deploy.
+6. Wait for the first build and model initialization to complete. Community
+   Cloud downloads the package dependencies and EasyOCR recognition weights.
+
+The custom YOLOv8 weights (24.5 MB) and fallback weights (6.2 MB) are already
+stored in the repository; each file is below GitHub's 100 MB file limit.
+Community Cloud does not receive the ignored local SQLite database, so its
+history starts empty. Its local filesystem is ephemeral and history may be
+reset after an app rebuild or restart. Persistent history requires a separate
+persistent database service.
+
+The Streamlit app performs CPU inference and does not start a webcam or IP
+camera. The free cloud instance has limited memory; if model initialization
+runs out of memory, try a smaller image or use a machine with more memory.
+The existing Flask app and its local camera features remain separate.
+
+### 5. Run the existing Flask application
 
 Start the Flask server:
 
@@ -189,7 +241,7 @@ To access from other devices on your local Wi-Fi network (e.g. smartphone or tab
 http://<YOUR_LOCAL_IP>:5000
 ```
 
-### 4. Deploy a Public Demo
+### 6. Existing Flask public demo
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vijayalnavar16-oss/ANPR-System)
 

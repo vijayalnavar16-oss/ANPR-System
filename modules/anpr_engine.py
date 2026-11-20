@@ -120,6 +120,7 @@ class ANPREngine:
         self.recent_detections = {}
         self.suppression_seconds = DUPLICATE_SUPPRESSION_SECONDS
         self.lock = threading.Lock()
+        self.image_inference_lock = threading.Lock()
 
         # CPU Optimization: Throttling inference interval
         self.min_inference_interval = 0.12  # Run deep inference ~8 times/sec
@@ -214,8 +215,7 @@ class ANPREngine:
 
             # Multi-tier watermark filtering
             if self._is_watermark(raw_text, current_box, (h, w)):
-                status = "REJECTED_WATERMARK"
-                ocr_res["verification_status"] = "REJECTED_WATERMARK"
+                continue
 
             # 5. Multi-Frame Tracking Association
             track = self._associate_or_create_track(current_box, current_time)
@@ -309,6 +309,128 @@ class ANPREngine:
         self.cached_detections = new_detections
 
         return annotated_frame, new_detections
+
+    def process_image(
+        self,
+        image: np.ndarray,
+        log_to_db: bool = True,
+        device: str = "cpu"
+    ) -> dict:
+        """Run detector and OCR once on a still image without multi-frame tracking."""
+        if not isinstance(image, np.ndarray):
+            raise TypeError("image must be a NumPy array")
+        if image.size == 0:
+            return {
+                "success": False,
+                "error": "Empty image data.",
+                "plate_count": 0,
+                "detections": [],
+                "annotated_image": None
+            }
+
+        with self.image_inference_lock:
+            detection_result = self.detector.detect_plates(
+                image,
+                save_crops=False,
+                device=device
+            )
+            if not detection_result["success"]:
+                return detection_result
+
+            annotated_image = detection_result["annotated_image"].copy()
+            detections = []
+            for detection in detection_result["detections"]:
+                crop = detection["crop"]
+                detection_confidence = float(detection["confidence"])
+                ocr_result = self.ocr_reader.read_plate(
+                    crop,
+                    log_to_db=False,
+                    yolo_confidence=detection_confidence
+                )
+                plate_number = ocr_result.get("plate_number") or "UNREADABLE"
+                status = ocr_result.get("verification_status", "UNREADABLE")
+                ocr_confidence = float(ocr_result.get("confidence", 0.0))
+                crop_path = ""
+                record_id = None
+
+                x1, y1, x2, y2 = detection["box"]
+                if status in ("VALID_INDIAN_PLATE", "CONFIRMED"):
+                    color = (0, 210, 115)
+                elif status in ("PENDING_RECHECK", "MANUAL_VERIFICATION"):
+                    color = (0, 185, 255)
+                elif status.startswith("REJECTED"):
+                    color = (55, 55, 235)
+                else:
+                    color = (165, 170, 180)
+
+                cv2.rectangle(annotated_image, (x1, y1), (x2, y2), color, 3, cv2.LINE_AA)
+                label = (
+                    f"{plate_number} | OCR {ocr_confidence:.0%} "
+                    f"| YOLO {detection_confidence:.0%}"
+                )
+                (label_width, label_height), _ = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                )
+                label_y = max(y1 - label_height - 10, 0)
+                cv2.rectangle(
+                    annotated_image,
+                    (x1, label_y),
+                    (min(x1 + label_width + 10, annotated_image.shape[1]), y1),
+                    color,
+                    -1
+                )
+                cv2.putText(
+                    annotated_image,
+                    label,
+                    (x1 + 5, max(y1 - 5, label_height)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA
+                )
+
+                if log_to_db:
+                    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+                    filename = f"upload_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}.jpg"
+                    saved_crop = CAPTURES_DIR / filename
+                    if not cv2.imwrite(str(saved_crop), crop):
+                        raise OSError(f"Could not save detected plate crop to {saved_crop}")
+                    crop_path = f"captures/{filename}"
+                    record_id = insert_record(
+                        plate_number=plate_number,
+                        raw_text=ocr_result.get("raw_text", ""),
+                        confidence=ocr_confidence,
+                        image_path=crop_path,
+                        verification_status=status,
+                        verified_by="SYSTEM_IMAGE",
+                        detection_confidence=detection_confidence,
+                        registration_type=ocr_result.get("registration_type", "UNKNOWN"),
+                        frame_count=1
+                    )
+
+                detections.append({
+                    "box": detection["box"],
+                    "crop": crop,
+                    "crop_path": crop_path,
+                    "plate_number": plate_number,
+                    "raw_text": ocr_result.get("raw_text", ""),
+                    "ocr_confidence": ocr_confidence,
+                    "detection_confidence": detection_confidence,
+                    "verification_status": status,
+                    "is_valid": bool(ocr_result.get("is_valid", False)),
+                    "reason": ocr_result.get("reason", ""),
+                    "registration_type": ocr_result.get("registration_type", "UNKNOWN"),
+                    "record_id": record_id
+                })
+
+            return {
+                "success": True,
+                "plate_count": len(detections),
+                "detections": detections,
+                "annotated_image": annotated_image,
+                "model_used": detection_result.get("model_used", str(self.detector.model_path))
+            }
 
     def _associate_or_create_track(self, box: tuple, current_time: float) -> PlateTrack:
         """Associates detection box with an existing active track using IOU, or creates a new track."""
