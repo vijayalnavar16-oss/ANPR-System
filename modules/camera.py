@@ -58,8 +58,15 @@ class VideoCamera:
                 self.cap = cv2.VideoCapture(self.source)
 
             if self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+                # Only force resolution on built-in laptop webcams (index 0).
+                # Mobile virtual camera drivers like iVCam (index 1) fail or output
+                # completely black frames if forced into an unsupported 640x480 pin mode.
+                if self.source == 0:
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+                # Flush initial buffer frames
+                for _ in range(3):
+                    self.cap.grab()
                 self.is_running = True
                 self.connection_error = None
             else:
