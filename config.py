@@ -64,6 +64,6 @@ WATERMARK_EXCLUSION_REGION = {
 
 # Flask Web Server
 FLASK_HOST = "0.0.0.0"  # Listen on all interfaces so you can view the dashboard from phone or laptop
-FLASK_PORT = 5000
+FLASK_PORT = int(os.environ.get("PORT", 5000))
 FLASK_DEBUG = False
 PUBLIC_DEMO_MODE = os.getenv("PUBLIC_DEMO_MODE", "").strip().lower() in {"1", "true", "yes"}
